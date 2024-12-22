@@ -177,38 +177,3 @@ class VideoPlayerEditor(QMainWindow):
            
             self.start_cut_slider.setRange(0, int(total_time * 1000))
             self.end_cut_slider.setRange(0, int(total_time * 1000))
-
-    def format_time(self, seconds):
-        minutes = int(seconds // 60)
-        seconds = int(seconds % 60)
-        return f"{minutes:02}:{seconds:02}"
-
-    def update_start_label(self, value):
-        start_time = value / 1000.0
-        self.start_label.setText(f"Начало: {self.format_time(start_time)}")
-
-    def update_end_label(self, value):
-        end_time = value / 1000.0
-        self.end_label.setText(f"Конец: {self.format_time(end_time)}")
-
-    def cut_video(self):
-        start_time = self.start_cut_slider.value() / 1000.0
-        end_time = self.end_cut_slider.value() / 1000.0
-        if start_time >= end_time:
-            print("Неверный интервал обрезки")
-            return
-
-        output_path, _ = QFileDialog.getSaveFileName(self, "Сохранить обрезанное видео", "", "MP4 Files (*.mp4)")
-        if output_path:
-            self.cut_thread = VideoCutThread(self.video_path, start_time, end_time, output_path)
-            self.cut_thread.cut_finished.connect(self.on_cut_finished)
-            self.cut_thread.start()
-
-    def on_cut_finished(self, output_path):
-        print(f"Видео сохранено {output_path}")
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    player = VideoPlayerEditor()
-    player.show()
-    sys.exit(app.exec_())
