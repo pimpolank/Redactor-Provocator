@@ -1,18 +1,15 @@
 import sys
-import vlc
 import time
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget,
     QFileDialog, QSlider, QLabel, QHBoxLayout
 )
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QUrl, QThread, pyqtSignal, QSize
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets import QVideoWidget
 from moviepy.video.io.VideoFileClip import VideoFileClip
 
-# Поток для обрезки видео
 class VideoCutThread(QThread):
-    """
-    Класс потока для обрезки видео с помощью moviepy.
-    """
     cut_finished = pyqtSignal(str)
 
     def __init__(self, video_path, start_time, end_time, output_path):
@@ -24,7 +21,7 @@ class VideoCutThread(QThread):
 
     def run(self):
         try:
-            clip = VideoFileClip(self.video_path).subclipped(self.start_time, self.end_time)
+            clip = VideoFileClip(self.video_path).subclip(self.start_time, self.end_time)
             clip.write_videofile(self.output_path, codec="libx264", logger=None)
             self.cut_finished.emit(self.output_path)
         except Exception as e:
@@ -33,197 +30,183 @@ class VideoCutThread(QThread):
 class VideoPlayerEditor(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Видеоредактор")
-        self.setGeometry(100, 100, 900, 700)
+        self.setWindowTitle("Clipmaster")
+        self.setGeometry(100, 100, 1024, 768)
 
-        # VLC
-        self.instance = vlc.Instance()
-        self.media_player = self.instance.media_player_new()
+        # Медиаплеер
+        self.media_player = QMediaPlayer(self)
+        self.audio_output = QAudioOutput()
+        self.media_player.setAudioOutput(self.audio_output)
 
-        # Видео-виджет
-        self.video_widget = QWidget(self)
-        self.video_widget.setGeometry(10, 10, 880, 500)
+        # Видео отображение
+        self.video_widget = QVideoWidget()
+        self.media_player.setVideoOutput(self.video_widget)
 
-        # Кнопки управления
-        self.open_button = QPushButton("Открыть")
+        # Кнопки
+        self.open_button = QPushButton("📂")
+        self.open_button.setToolTip("Открыть видео")
         self.open_button.clicked.connect(self.open_file)
 
-        self.play_pause_button = QPushButton("Воспроизвести")
+        self.play_pause_button = QPushButton("▶️")
+        self.play_pause_button.setToolTip("Воспроизвести/Пауза")
         self.play_pause_button.clicked.connect(self.play_pause)
         self.play_pause_button.setEnabled(False)
 
-        self.stop_button = QPushButton("Остановка")
+        self.stop_button = QPushButton("⏹")
+        self.stop_button.setToolTip("Стоп")
         self.stop_button.clicked.connect(self.stop)
         self.stop_button.setEnabled(False)
 
-        self.cut_button = QPushButton("Обрезать видео")
+        self.cut_button = QPushButton("✂️")
+        self.cut_button.setToolTip("Обрезать видео")
         self.cut_button.clicked.connect(self.cut_video)
-        self.cut_button.hide()
+        self.cut_button.setEnabled(False)
+
+        self.fullscreen_button = QPushButton("🖥️")
+        self.fullscreen_button.setToolTip("Развернуть видео")
+        self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
 
         # Ползунки
-        self.seek_slider = QSlider(Qt.Horizontal)
+        self.seek_slider = QSlider(Qt.Orientation.Horizontal)
         self.seek_slider.setRange(0, 1000)
         self.seek_slider.sliderMoved.connect(self.set_position)
-        self.seek_slider.hide()
+        self.seek_slider.setEnabled(False)
 
-        self.start_cut_slider = QSlider(Qt.Horizontal)
-        self.start_cut_slider.setRange(0, 1000)
-        self.start_cut_slider.valueChanged.connect(self.update_start_label)
-        self.start_cut_slider.hide()
-
-        self.end_cut_slider = QSlider(Qt.Horizontal)
-        self.end_cut_slider.setRange(0, 1000)
-        self.end_cut_slider.valueChanged.connect(self.update_end_label)
-        self.end_cut_slider.hide()
-
-        # Метки времени
         self.time_label = QLabel("00:00 / 00:00")
-        self.time_label.hide()
-        self.start_label = QLabel("Начало: 00:00")
-        self.start_label.hide()
-        self.end_label = QLabel("Конец: 00:00")
-        self.end_label.hide()
 
-        # Таймер для обновления UI
+        # Таймер
         self.timer = QTimer(self)
-        self.timer.setInterval(50)
+        self.timer.setInterval(100)
         self.timer.timeout.connect(self.update_ui)
 
-        # Раскладка элементов
+        # Разметка
         control_layout = QHBoxLayout()
-        control_layout.setContentsMargins(0, 0, 0, 0)
-        control_layout.setSpacing(5)
-        control_layout.addWidget(self.open_button)
-        control_layout.addWidget(self.play_pause_button)
-        control_layout.addWidget(self.stop_button)
-        control_layout.addWidget(self.seek_slider)
-        control_layout.addWidget(self.time_label)
+        for btn in [self.open_button, self.play_pause_button, self.stop_button, self.cut_button, self.fullscreen_button]:
+            btn.setFixedSize(QSize(60, 60))
+            control_layout.addWidget(btn)
 
-        cut_layout = QHBoxLayout()
-        cut_layout.setContentsMargins(0, 0, 0, 0)
-        cut_layout.setSpacing(5)
-        cut_layout.addWidget(self.start_label)
-        cut_layout.addWidget(self.start_cut_slider)
-        cut_layout.addWidget(self.end_label)
-        cut_layout.addWidget(self.end_cut_slider)
-        cut_layout.addWidget(self.cut_button)
+        seek_layout = QHBoxLayout()
+        seek_layout.addWidget(self.time_label)
+        seek_layout.addWidget(self.seek_slider)
 
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(5)
         main_layout.addWidget(self.video_widget)
+        main_layout.addLayout(seek_layout)
         main_layout.addLayout(control_layout)
-        main_layout.addLayout(cut_layout)
 
         central_widget = QWidget(self)
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
 
-        # Привязка VLC к виджету
-        if sys.platform.startswith("win"):
-            self.media_player.set_hwnd(self.video_widget.winId())
-        else:
-            self.media_player.set_xwindow(self.video_widget.winId())
-
-        # Тёмная тема
+        # Стиль
         self.setStyleSheet("""
-        QMainWindow { background-color: #2e2e2e; }
-        QWidget { background-color: #2e2e2e; color: #fff; }
-        QPushButton { background-color: #444; color: #fff; padding: 5px; border-radius: 5px; }
-        QPushButton:hover { background-color: #555; }
-        QSlider { background-color: #444; }
-        QLabel { color: #fff; }
+            QMainWindow {
+                background-color: #121212;
+            }
+            QWidget {
+                background-color: #1e1e1e;
+                color: #e0e0e0;
+                font-family: "Segoe UI", sans-serif;
+                font-size: 16px;
+                border-radius: 10px;
+            }   
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                font-size: 24px;
+                border: none;
+                border-radius: 12px;
+            }
+            QPushButton:hover {
+                background-color: #393939;
+            }
+            QSlider::groove:horizontal {
+                height: 8px;
+                background: #3c3c3c;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #ffffff;
+                width: 18px;
+                height: 18px;
+                margin: -5px 0;
+                border-radius: 9px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #00c853;
+                border-radius: 4px;
+            }
+            QLabel {
+                font-size: 14px;
+                color: #b0b0b0;
+            }
         """)
 
     def open_file(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Открыть видео", "", "MP4 Files (*.mp4)")
+        filename, _ = QFileDialog.getOpenFileName(self, "Открыть видео", "", "Видео файлы (*.mp4 *.avi *.mkv *.mov)")
         if filename:
-            self.media_player.set_media(self.instance.media_new(filename))
             self.video_path = filename
-            self.media_player.play()
-            QTimer.singleShot(100, lambda: self.media_player.set_pause(True))
-            self.timer.start()
-
-            self.seek_slider.show()
-            self.start_cut_slider.show()
-            self.end_cut_slider.show()
-            self.time_label.show()
-            self.start_label.show()
-            self.end_label.show()
+            self.media_player.setSource(QUrl.fromLocalFile(filename))
             self.play_pause_button.setEnabled(True)
             self.stop_button.setEnabled(True)
             self.cut_button.setEnabled(True)
-            self.cut_button.show()
+            self.seek_slider.setEnabled(True)
+            self.media_player.play()
+            self.timer.start()
 
     def play_pause(self):
-        if self.media_player.is_playing():
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
-            self.play_pause_button.setText("Продолжить")
+            self.play_pause_button.setText("▶️")
         else:
             self.media_player.play()
-            self.play_pause_button.setText("Пауза")
+            self.play_pause_button.setText("⏸️")
 
     def stop(self):
         self.media_player.stop()
-        self.timer.stop()
-        self.play_pause_button.setText("Воспроизвести")
+        self.play_pause_button.setText("▶️")
 
     def set_position(self, position):
-        self.media_player.set_position(position / 1000.0)
+        duration = self.media_player.duration()
+        if duration > 0:
+            self.media_player.setPosition((position / 1000) * duration)
 
     def update_ui(self):
-        current_time = self.media_player.get_time() / 1000
-        total_time = self.media_player.get_length() / 1000
-        if total_time > 0:
-            self.seek_slider.setValue(int((current_time / total_time) * 1000))
-            self.time_label.setText(f"{self.format_time(current_time)} / {self.format_time(total_time)}")
-            self.start_cut_slider.setRange(0, int(total_time * 1000))
-            self.end_cut_slider.setRange(0, int(total_time * 1000))
+        position = self.media_player.position()
+        duration = self.media_player.duration()
+
+        if duration > 0:
+            self.seek_slider.setValue(int((position / duration) * 1000))
+            self.time_label.setText(f"{self.format_time(position/1000)} / {self.format_time(duration/1000)}")
 
     def format_time(self, seconds):
         minutes = int(seconds // 60)
         seconds = int(seconds % 60)
         return f"{minutes:02}:{seconds:02}"
 
-    def update_start_label(self, value):
-        start_time = value / 1000.0
-        self.start_label.setText(f"Начало: {self.format_time(start_time)}")
-
-    def update_end_label(self, value):
-        end_time = value / 1000.0
-        self.end_label.setText(f"Конец: {self.format_time(end_time)}")
-
     def cut_video(self):
-        start_time = self.start_cut_slider.value() / 1000.0
-        end_time = self.end_cut_slider.value() / 1000.0
-        if start_time >= end_time:
-            print("Неверный интервал обрезки")
-            return
-
-        output_path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить обрезанное видео", "", "MP4 Files (*.mp4)"
-        )
+        start_time = 0
+        end_time = self.media_player.duration() / 1000
+        output_path, _ = QFileDialog.getSaveFileName(self, "Сохранить обрезанное видео", "", "MP4 файлы (*.mp4)")
         if output_path:
-            self.cut_thread = VideoCutThread(
-                self.video_path, start_time, end_time, output_path
-            )
+            self.cut_thread = VideoCutThread(self.video_path, start_time, end_time, output_path)
             self.cut_thread.cut_finished.connect(self.on_cut_finished)
             self.cut_thread.start()
 
     def on_cut_finished(self, output_path):
-        print(f"Видео сохранено: {output_path}")
+        print(f"Видео успешно сохранено: {output_path}")
 
-def run():
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+def main():
     app = QApplication(sys.argv)
     player = VideoPlayerEditor()
     player.show()
-    # Запускаем цикл Qt и ждём, пока пользователь сам закроет окно
-    app.exec_()
-
-def main():
-    print("Clipmaster is running…")
-    run()
-    print("Окно закрыто — завершаем процесс.")
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
